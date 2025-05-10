@@ -103,6 +103,41 @@ def save_predictions_by_source(test_sources, pred_Y, test_Y, output_dir="result"
     print(f"分類預測結果已儲存到資料夾：{output_dir}")
     return results_by_source
 
+import os
+import csv
+import pandas as pd
+from collections import defaultdict
+import torch
+
+def save_predictions_by_source_classification(test_sources, pred_classes, test_Y, output_dir="result"):
+    results_by_source = defaultdict(list)
+
+    for i, source_path in enumerate(test_sources):
+        source_name = os.path.splitext(os.path.basename(source_path))[0]
+        predicted_class = int(pred_classes[i].item())  # ← 直接用 class index
+        actual_class = int(test_Y[i].item())
+
+        results_by_source[source_name].append({
+            'Predicted_class': predicted_class,
+            'Actual_class': actual_class
+        })
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    for source_name, rows in results_by_source.items():
+        df = pd.DataFrame(rows)
+        df.to_csv(
+            f"{output_dir}/{source_name}_predictions.csv",
+            index=False,
+            encoding="utf-8-sig",
+            sep=",",
+            quoting=csv.QUOTE_NONNUMERIC
+        )
+
+    print(f"分類預測結果已儲存到資料夾：{output_dir}")
+    return results_by_source
+
+
 def calculate_rmse_by_source(results_by_source, save_csv_path=None):
     rmse_by_source = {}
 
@@ -118,8 +153,8 @@ def calculate_rmse_by_source(results_by_source, save_csv_path=None):
         rmse_poly = np.sqrt(mean_squared_error(actual_poly, predicted_poly))
 
         rmse_by_source[source_name] = {
-            'RMSE_cotton': round(rmse_cotton, 4),
-            'RMSE_poly': round(rmse_poly, 4)
+            'RMSE_cotton': (rmse_cotton),
+            'RMSE_poly': (rmse_poly)
         }
 
     print("\n===== 各來源的 RMSE 結果 =====")
@@ -195,6 +230,17 @@ def calculate_rmse_by_source(results_by_source, save_csv_path=None):
 #         print(f"RMSE 結果已儲存至：{save_csv_path}")
 #
 #     return rmse_by_source
+
+def print_avg_predicted_ratios(results_by_source):
+    print("\n===== 各紗種的預測成分平均比例（百分比） =====")
+    for source_name, rows in results_by_source.items():
+        df = pd.DataFrame(rows)
+        avg_pred_cotton = df['Predicted_cotton'].mean() * 100
+        avg_pred_poly = df['Predicted_poly'].mean() * 100
+        print(f"{source_name} - Predicted Cotton: {avg_pred_cotton:.2f}%, Predicted Poly: {avg_pred_poly:.2f}%")
+
+
+
 def process_npy_to_blocks(folder: str, block_size: int) -> Dict[str, List[np.ndarray]]:
     """
     Read .npy files from the folder, split into blocks, and apply mean_spectral.

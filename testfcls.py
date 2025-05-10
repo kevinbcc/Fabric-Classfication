@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import glob
 import os
-from src.utils import save_predictions_by_source, calculate_rmse_by_source
+from src.utils import save_predictions_by_source, calculate_rmse_by_source, print_avg_predicted_ratios
 from src.preprocessing import Preprocessing
 from src.train import select_train_test_samples
 from src.module import FCLS  # 確保這是你定義的 FCLS 函式
@@ -12,8 +12,9 @@ from src.module import FCLS  # 確保這是你定義的 FCLS 函式
 orignal_data_path = "data"
 preprocessin_data_path = "preprocessing_data"
 block_size = 20
-band_num = 50
+band_num = 20
 mode = "PCA_BANDSELECT"
+# mode = "SNV"
 amplification_factor = 2.0
 
 # ======= 載入與預處理資料 =======
@@ -35,7 +36,7 @@ g_mapping = {
     f"./{preprocessin_data_path}/OE5050_RT_roi_25x500.npy": (0.5, 0.5),
 }
 
-proportion_mode = (0.3, "train")
+proportion_mode = (0.1, "train")
 
 train_X, train_Y, test_X, test_Y, test_sources = select_train_test_samples(
     proportion_mode=proportion_mode,
@@ -48,7 +49,7 @@ train_X, train_Y, test_X, test_Y, test_sources = select_train_test_samples(
 # 請根據你的應用場景從原始樣本中取出 pure pixel 並套用 PCA
 
 # 定義每個測試來源對應的 cotton 和 polyester 純樣本檔案
-source_to_endmember_paths = {
+source_to_endmember_paths = ({
     "COMPACT100C_RT_roi_25x500.npy": ("COMPACT100C_RT_roi_25x500.npy", "COMPACT100P_RT_roi_25x500.npy"),
     "COMPACT100P_RT_roi_25x500.npy": ("COMPACT100C_RT_roi_25x500.npy", "COMPACT100P_RT_roi_25x500.npy"),
     "COMPACT5050_RT_roi_25x500.npy": ("COMPACT100C_RT_roi_25x500.npy", "COMPACT100P_RT_roi_25x500.npy"),
@@ -58,10 +59,25 @@ source_to_endmember_paths = {
     "OE100C_RT_roi_25x500.npy": ("OE100C_RT_roi_25x500.npy", "OE100P_RT_roi_25x500.npy"),
     "OE100P_RT_roi_25x500.npy": ("OE100C_RT_roi_25x500.npy", "OE100P_RT_roi_25x500.npy"),
     "OE5050_RT_roi_25x500.npy": ("OE100C_RT_roi_25x500.npy", "OE100P_RT_roi_25x500.npy"),
-}
+})
 
-# 做 FCLS 預測，每筆使用自己來源對應的端元
+# # 定義每個測試來源對應的 cotton 和 polyester 純樣本檔案
+# source_to_endmember_paths = ({
+#     "COMPACT100C_RT_roi_spectra.npy": ("COMPACT100C_RT_roi_spectra.npy", "COMPACT100P_RT_roi_spectra.npy"),
+#     "COMPACT100P_RT_roi_spectra.npy": ("COMPACT100C_RT_roi_spectra.npy", "COMPACT100P_RT_roi_spectra.npy"),
+#     "COMPACT5050_RT_roi_spectra.npy": ("COMPACT100C_RT_roi_spectra.npy", "COMPACT100P_RT_roi_spectra.npy"),
+#     "MVS100C_RT_roi_spectra.npy": ("MVS100C_RT_roi_spectra.npy", "MVS100P_RT_roi_spectra.npy"),
+#     "MVS100P_RT_roi_spectra.npy": ("MVS100C_RT_roi_spectra.npy", "MVS100P_RT_roi_spectra.npy"),
+#     "MVS5050_RT_roi_spectra.npy": ("MVS100C_RT_roi_spectra.npy", "MVS100P_RT_roi_spectra.npy"),
+#     "OE100C_RT_roi_spectra.npy": ("OE100C_RT_roi_spectra.npy", "OE100P_RT_roi_spectra.npy"),
+#     "OE100P_RT_roi_spectra.npy": ("OE100C_RT_roi_spectra.npy", "OE100P_RT_roi_spectra.npy"),
+#     "OE5050_RT_roi_spectra.npy": ("OE100C_RT_roi_spectra.npy", "OE100P_RT_roi_spectra.npy"),
+# })
+
+
 test_X_np = test_X.squeeze(1).cpu().numpy()
+test_X_np = test_X_np  # 只保留第 20–200 波段
+
 pred_Y = []
 
 for i, r1 in enumerate(test_X_np):
@@ -71,17 +87,34 @@ for i, r1 in enumerate(test_X_np):
     cotton_path = os.path.join(preprocessin_data_path, cotton_file)
     poly_path = os.path.join(preprocessin_data_path, poly_file)
 
-    # 各自取 mean 並組成端元矩陣 M
-    m1 = np.load(cotton_path).mean(axis=0)
-    m2 = np.load(poly_path).mean(axis=0)
+    #確保 shape 是 [num_pixel, bands]
+    m1 = np.load(cotton_path).reshape(-1, r1.shape[-1]).mean(axis=0)
+    m2 = np.load(poly_path).reshape(-1, r1.shape[-1]).mean(axis=0)
+
+    # def load_mean_band_range(path, start=10, end=225):
+    #     arr = np.load(path)
+    #     if arr.ndim == 1:
+    #         return arr[start:end]
+    #     elif arr.ndim == 2:
+    #         return arr[:, start:end].mean(axis=0)
+    #     else:
+    #         raise ValueError(f"Unsupported array shape: {arr.shape}")
+
+
+    # m1 = load_mean_band_range(cotton_path)
+    # m2 = load_mean_band_range(poly_path)
     M = np.stack([m1, m2], axis=1)  # shape: [bands, 2]
 
-    delta = 1 / (10 * np.max(M))
+    delta = 1 / (10 * np.linalg.norm(M, ord='fro'))
     abund, _ = FCLS(M, r1, delta)
     pred_Y.append(abund)
 
 pred_Y = torch.from_numpy(np.array(pred_Y, dtype=np.float32))
 
+
 # ======= 儲存與評估 =======
 results_by_source = save_predictions_by_source(test_sources, pred_Y, test_Y)
 rmse_by_source = calculate_rmse_by_source(results_by_source, save_csv_path="result/sourcewise_rmse.csv")
+
+# 顯示每一種紗種的真實成分平均比例（Cotton / Poly）
+print_avg_predicted_ratios(results_by_source)

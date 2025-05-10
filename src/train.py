@@ -4,6 +4,7 @@ import torch
 import random
 from typing import Dict, Tuple, List
 from sklearn.model_selection import train_test_split
+import torch.nn as nn
 from tqdm import tqdm
 
 def select_train_test_samples(
@@ -65,9 +66,49 @@ def select_train_test_samples(
 
     return train_X, train_Y, test_X, test_Y, test_sources
 
+def select_train_test_samples_classification(
+        proportion: float,
+        g_mapping: Dict[str, int],
+        avg_block_size: int = 50
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-import torch
-from torch.utils.data import DataLoader, TensorDataset
+    train_X_list, train_Y_list = [], []
+    test_X_list, test_Y_list = [], []
+    test_sources: List[str] = []
+
+    for file_name, class_label in g_mapping.items():
+        samples = np.load(file_name)
+        if samples.ndim != 2:
+            raise ValueError(f"Unexpected sample shape in file {file_name}. Expected 2D, got {samples.ndim}D.")
+        np.random.shuffle(samples)
+        num_pixels, num_bands = samples.shape
+        num_blocks = num_pixels // avg_block_size
+
+        block_averages = [
+            np.mean(samples[i * avg_block_size:(i + 1) * avg_block_size], axis=0)
+            for i in range(num_blocks)
+        ]
+
+        for avg_spectrum in block_averages:
+            if random.random() < proportion:
+                train_X_list.append(avg_spectrum)
+                train_Y_list.append(class_label)
+            else:
+                test_X_list.append(avg_spectrum)
+                test_Y_list.append(class_label)
+                test_sources.append(file_name)
+
+    train_X = torch.tensor(np.array(train_X_list), dtype=torch.float32).unsqueeze(1).to(device)
+    train_Y = torch.tensor(train_Y_list, dtype=torch.long).to(device)
+    test_X = torch.tensor(np.array(test_X_list), dtype=torch.float32).unsqueeze(1).to(device)
+    test_Y = torch.tensor(test_Y_list, dtype=torch.long).to(device)
+
+    return train_X, train_Y, test_X, test_Y, test_sources
+
+
+
+
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -114,6 +155,11 @@ def train_model(model, train_X, train_Y, epochs, criterion, optimizer, scheduler
 
             optimizer.zero_grad()
             outputs = model(batch_X)
+
+            # ✅ 自動處理分類情況
+            if isinstance(criterion, nn.CrossEntropyLoss):
+                batch_Y = batch_Y.long()
+
             loss = criterion(outputs, batch_Y)
             loss.backward()
             optimizer.step()

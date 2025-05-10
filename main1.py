@@ -1,5 +1,5 @@
 from src.train import train_model,select_train_test_samples
-from src.utils import save_predictions_by_source,calculate_rmse_by_source,process_npy_to_blocks
+from src.utils import save_predictions_by_source,calculate_rmse_by_source, print_avg_predicted_ratios
 from src.module import SimpleCNN_MLP,MLP2, ImprovedSimpleCNN_MLP
 from src.preprocessing import Preprocessing
 import torch
@@ -14,9 +14,10 @@ preprocessin_data_path = "preprocessing_data"
 block_size =20
 # band_num =22 #best
 # band_num =15
-band_num =50
+band_num = 100
 # mode = "PCA_BANDSELECT_AMPLIFY_ERROR"
 mode = "PCA_BANDSELECT"
+# mode  = "SNV"
 # mode = "DERIVATIVE"
 # mode = "NMF_AMPLIFY_ERROR"
 # mode = "NMF" # 這個會慢很多
@@ -24,9 +25,9 @@ mode = "PCA_BANDSELECT"
 amplification_factor = 2.0
 
 #訓練參數
-epochs =300
+epochs = 20
 # epochs =500
-proportion_mode=(0.4, "train")
+proportion_mode=(0.1, "train")
 Learning_Rate=0.01
 
 # ======= 加載並預處理數據 =======
@@ -79,7 +80,7 @@ model, best_loss, final_lr = train_model(
     model,
     train_X,
     train_Y,
-    epochs=300,
+    epochs=50,
     criterion=criterion,
     optimizer=optimizer,
     scheduler=scheduler,
@@ -99,6 +100,9 @@ results_by_source = save_predictions_by_source(test_sources, pred_Y, test_Y)
 
 # 計算並顯示/儲存 RMSE
 rmse_by_source = calculate_rmse_by_source(results_by_source, save_csv_path="result/sourcewise_rmse.csv")
+
+# 顯示每一種紗種的真實成分平均比例（Cotton / Poly）
+print_avg_predicted_ratios(results_by_source)
 
 
 
